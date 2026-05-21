@@ -5,7 +5,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores.pgvector import PGVector
 from core.db import DATABASE_URL
 
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 
 def get_vector_store():
     # Replace +asyncpg with psycopg2 for LangChain's sync PGVector implementation

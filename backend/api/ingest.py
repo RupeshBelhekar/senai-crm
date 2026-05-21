@@ -80,7 +80,7 @@ async def ingest_email(payload: EmailPayload, background_tasks: BackgroundTasks,
         sender=payload.sender,
         subject=payload.subject,
         body=payload.body[:10000], # Truncate long bodies
-        timestamp=payload.timestamp,
+        timestamp=payload.timestamp.replace(tzinfo=None),
         urgency=urgency_flag,
         category=category_flag,
         status="Processing"

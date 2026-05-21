@@ -33,6 +33,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://senai:senai_password@db:5432/senai_crm
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_API_KEY=${GEMINI_API_KEY}
     depends_on:
       db:
         condition: service_healthy
@@ -49,6 +50,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://senai:senai_password@db:5432/senai_crm
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_API_KEY=${GEMINI_API_KEY}
     depends_on:
       - db
       - redis

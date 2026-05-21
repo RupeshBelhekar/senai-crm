@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, text
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
@@ -223,6 +223,7 @@ async def approve_action(action_id: int, db: AsyncSession = Depends(get_db)):
     """
     Approves a proposed action (auto-reply or escalation).
     """
+    import uuid
     stmt = select(Action).where(Action.id == action_id)
     res = await db.execute(stmt)
     action = res.scalars().first()
@@ -244,6 +245,24 @@ async def approve_action(action_id: int, db: AsyncSession = Depends(get_db)):
     if email:
         email.status = "Replied" if action.action_type == "Auto-Reply" else "Escalated"
         
+        # Create outgoing email record to show in thread history if it's a reply
+        if action.action_type == "Auto-Reply":
+            outgoing_email = Email(
+                thread_id=email.thread_id,
+                message_id=f"auto_{uuid.uuid4()}@internal.com",
+                sender="support@internal.com",
+                subject=f"Re: {email.subject}",
+                body=action.proposed_content or "",
+                timestamp=datetime.utcnow(),
+                sentiment_score=1.0,
+                category="Auto-Reply",
+                urgency=email.urgency,
+                requires_human=False,
+                confidence=1.0,
+                status="Replied"
+            )
+            db.add(outgoing_email)
+        
         # Update thread status
         thread_stmt = select(Thread).where(Thread.id == email.thread_id)
         thread_res = await db.execute(thread_stmt)
@@ -254,6 +273,91 @@ async def approve_action(action_id: int, db: AsyncSession = Depends(get_db)):
             
     await db.commit()
     return {"status": "success", "action_id": action.id}
+
+class ReplyRequest(BaseModel):
+    body: str
+
+@router.post("/threads/{thread_id}/reply")
+async def send_manual_reply(thread_id: str, payload: ReplyRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Sends a manual reply to a thread: creates an outgoing email, logs an Action, and resolves the thread.
+    """
+    import uuid
+    # 1. Fetch thread
+    stmt = select(Thread).where(Thread.thread_id == thread_id)
+    res = await db.execute(stmt)
+    thread = res.scalars().first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+        
+    # 2. Fetch all emails in thread to find the latest incoming email
+    email_stmt = select(Email).where(Email.thread_id == thread.id).order_by(desc(Email.timestamp))
+    email_res = await db.execute(email_stmt)
+    emails = email_res.scalars().all()
+    if not emails:
+        raise HTTPException(status_code=400, detail="Thread has no emails")
+        
+    latest_incoming = None
+    for email in emails:
+        if "internal.com" not in email.sender.lower():
+            latest_incoming = email
+            break
+            
+    if not latest_incoming:
+        # Fall back to the latest email
+        latest_incoming = emails[0]
+        
+    # 3. Create outgoing email
+    outgoing_email = Email(
+        thread_id=thread.id,
+        message_id=f"manual_{uuid.uuid4()}@internal.com",
+        sender="support@internal.com",
+        subject=f"Re: {thread.subject}",
+        body=payload.body,
+        timestamp=datetime.utcnow(),
+        sentiment_score=1.0,
+        category="Manual-Reply",
+        urgency=latest_incoming.urgency,
+        requires_human=False,
+        confidence=1.0,
+        status="Replied"
+    )
+    db.add(outgoing_email)
+    await db.flush()
+    
+    # 4. Handle actions on the latest incoming email
+    action_stmt = select(Action).where(and_(Action.email_id == latest_incoming.id, Action.is_approved == False))
+    action_res = await db.execute(action_stmt)
+    unapproved_actions = action_res.scalars().all()
+    
+    for action in unapproved_actions:
+        action.is_approved = True
+        action.executed_at = datetime.utcnow()
+        action.approved_by = "Human Operator"
+        action.proposed_content = payload.body
+        
+    if not unapproved_actions:
+        manual_action = Action(
+            email_id=latest_incoming.id,
+            agent_reasoning_log=[{"thought": "Operator responded manually.", "observation": None}],
+            action_type="Manual-Reply",
+            proposed_content=payload.body,
+            is_approved=True,
+            approved_by="Human Operator",
+            executed_at=datetime.utcnow()
+        )
+        db.add(manual_action)
+        
+    # 5. Update thread status
+    thread.status = "Resolved"
+    thread.last_updated_at = datetime.utcnow()
+    
+    # Update latest incoming email status
+    latest_incoming.status = "Replied"
+    
+    await db.commit()
+    return {"status": "success", "thread_id": thread.thread_id}
+
 
 @router.get("/contacts", response_model=List[ContactResponse])
 async def list_contacts(db: AsyncSession = Depends(get_db)):
@@ -278,8 +382,8 @@ async def get_analytics(db: AsyncSession = Depends(get_db)):
             func.count(Email.id).label('email_count')
         )
         .where(Email.sentiment_score.isnot(None))
-        .group_by(func.date_trunc('day', Email.timestamp))
-        .order_by(func.date_trunc('day', Email.timestamp))
+        .group_by(text('day'))
+        .order_by(text('day'))
     )
     sentiment_res = await db.execute(sentiment_query)
     sentiment_trend = [

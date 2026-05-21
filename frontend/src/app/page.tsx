@@ -77,6 +77,10 @@ export default function Home() {
   const [loadingList, setLoadingList] = useState(true)
   const [loadingDetail, setLoadingDetail] = useState(false)
   
+  // Custom manual reply state
+  const [replyBody, setReplyBody] = useState("")
+  const [isSendingReply, setIsSendingReply] = useState(false)
+  
   // Filters
   const [statusFilter, setStatusFilter] = useState("")
   const [urgencyFilter, setUrgencyFilter] = useState("")
@@ -141,6 +145,30 @@ export default function Home() {
     }
   }
 
+  // Send Manual Reply / Customize Action
+  const handleSendManualReply = async () => {
+    if (!selectedThreadId || !replyBody.trim()) return
+    setIsSendingReply(true)
+    try {
+      const res = await fetch(`${API_URL}/api/threads/${selectedThreadId}/reply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ body: replyBody })
+      })
+      if (res.ok) {
+        // Refresh details and threads list
+        fetchThreads()
+        fetchThreadDetail(selectedThreadId)
+      }
+    } catch (err) {
+      console.error("Failed to send manual reply:", err)
+    } finally {
+      setIsSendingReply(false)
+    }
+  }
+
   // Poll list data every 4 seconds for live updates
   useEffect(() => {
     fetchThreads(true)
@@ -158,6 +186,23 @@ export default function Home() {
       setThreadDetail(null)
     }
   }, [selectedThreadId])
+
+  useEffect(() => {
+    if (threadDetail) {
+      let activeDraft = ""
+      const reversedEmails = [...threadDetail.emails].reverse()
+      for (const email of reversedEmails) {
+        const activeAction = email.actions.find(a => !a.is_approved)
+        if (activeAction && activeAction.proposed_content) {
+          activeDraft = activeAction.proposed_content
+          break
+        }
+      }
+      setReplyBody(activeDraft)
+    } else {
+      setReplyBody("")
+    }
+  }, [threadDetail])
 
   // Helpers for styling sentiment score
   const getSentimentIcon = (score: number | null) => {
@@ -475,6 +520,54 @@ export default function Home() {
                     </div>
                   )
                 })}
+
+                {/* Reply Composer Card */}
+                {threadDetail.status.toLowerCase() !== "resolved" ? (
+                  <div className="glass-panel border-brand-500/20 bg-slate-900/30 rounded-xl p-4 mt-6 max-w-2xl w-full border space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+                        {threadDetail.emails.flatMap(e => e.actions).some(a => !a.is_approved) 
+                          ? "Proposed Response Draft" 
+                          : "Compose Manual Reply"}
+                      </span>
+                      {threadDetail.emails.flatMap(e => e.actions).some(a => !a.is_approved) && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand-950 text-brand-400 border border-brand-800 font-semibold font-mono animate-pulse">
+                          AI Assisted Draft
+                        </span>
+                      )}
+                    </div>
+
+                    <textarea
+                      value={replyBody}
+                      onChange={(e) => setReplyBody(e.target.value)}
+                      placeholder="Type your response to the user..."
+                      id="manual-reply-textarea"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-brand-500 min-h-[120px] resize-y leading-relaxed font-sans"
+                    />
+
+                    <div className="flex justify-between items-center pt-1.5">
+                      <span className="text-[9px] text-slate-500 max-w-md leading-normal">
+                        Clicking Approve & Send sends this reply to the customer, updates the database, and marks the thread as Resolved.
+                      </span>
+                      <button
+                        onClick={handleSendManualReply}
+                        disabled={isSendingReply || !replyBody.trim()}
+                        id="approve-and-send-manual-btn"
+                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white disabled:bg-slate-800/80 disabled:text-slate-500 disabled:cursor-not-allowed transition duration-200 flex items-center gap-1.5 shadow-lg shadow-brand-950/20"
+                      >
+                        {isSendingReply ? "Sending..." : "Approve & Send"}
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="glass-panel border-emerald-950/30 bg-emerald-950/5 rounded-xl p-4 mt-6 max-w-2xl w-full border text-center">
+                    <span className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                      <Check className="w-4 h-4" /> This thread has been resolved.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Workspace Metadata sidebar */}
