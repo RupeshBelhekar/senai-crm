@@ -1,3 +1,7 @@
+#Name: Rupesh Belhekar
+#College: VIIT
+#PRN No: 22210091
+
 # SenAI Agentic CRM Intelligence Platform
 
 Welcome to the **SenAI Agentic CRM Intelligence Platform** – a modern, high-end CRM that integrates real-time email ingestion, synchronous and asynchronous multi-layer intelligence (triage), Vector Retrieval-Augmented Generation (RAG), and a dark-mode glassmorphic interface for operator-in-the-loop review.
